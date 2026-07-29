@@ -43,6 +43,8 @@ import ai.onnxruntime.OrtSession
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.*
 import kotlinx.serialization.json.*
 import okhttp3.Interceptor
@@ -383,28 +385,32 @@ class SessionManager(private val context: Context) {
         }
     }
 
-    suspend fun saveSession(token: String, refresh: String, uid: String, name: String, mail: String) {
-        context.dataStore.edit { prefs ->
-            prefs[TOKEN_KEY] = token
-            prefs[REFRESH_KEY] = refresh
-            prefs[USER_ID_KEY] = uid
-            prefs[DISPLAY_NAME_KEY] = name
-            prefs[EMAIL_KEY] = mail
+    fun saveSession(token: String, refresh: String, uid: String, name: String, mail: String, scope: CoroutineScope = CoroutineScope(Dispatchers.IO)) {
+        scope.launch {
+            context.dataStore.edit { prefs ->
+                prefs[TOKEN_KEY] = token
+                prefs[REFRESH_KEY] = refresh
+                prefs[USER_ID_KEY] = uid
+                prefs[DISPLAY_NAME_KEY] = name
+                prefs[EMAIL_KEY] = mail
+            }
+            accessToken.value = token
+            refreshToken.value = refresh
+            userId.value = uid
+            displayName.value = name
+            email.value = mail
         }
-        accessToken.value = token
-        refreshToken.value = refresh
-        userId.value = uid
-        displayName.value = name
-        email.value = mail
     }
 
-    suspend fun clearSession() {
-        context.dataStore.edit { it.clear() }
-        accessToken.value = null
-        refreshToken.value = null
-        userId.value = null
-        displayName.value = null
-        email.value = null
+    fun clearSession(scope: CoroutineScope = CoroutineScope(Dispatchers.IO)) {
+        scope.launch {
+            context.dataStore.edit { it.clear() }
+            accessToken.value = null
+            refreshToken.value = null
+            userId.value = null
+            displayName.value = null
+            email.value = null
+        }
     }
 
     fun startAutoRefresh(api: SupabaseApi, scope: CoroutineScope) {
@@ -936,7 +942,8 @@ fun AuthScreen(navController: NavHostController, viewModel: MainViewModel) {
                                         res.refreshToken ?: "",
                                         uid,
                                         prof?.displayName ?: "User",
-                                        email
+                                        email,
+                                        coroutineScope
                                     )
                                     viewModel.checkModeratorStatus()
                                     navController.navigate("catalog") { popUpTo("auth") { inclusive = true } }
@@ -967,7 +974,8 @@ fun AuthScreen(navController: NavHostController, viewModel: MainViewModel) {
                                         res.refreshToken ?: "",
                                         uid,
                                         displayName,
-                                        email
+                                        email,
+                                        coroutineScope
                                     )
                                     navController.navigate("catalog") { popUpTo("auth") { inclusive = true } }
                                 }
@@ -1405,10 +1413,8 @@ fun ProfileScreen(navController: NavHostController, viewModel: MainViewModel) {
 
             Button(
                 onClick = {
-                    coroutineScope.launch {
-                        viewModel.sessionManager.clearSession()
-                        navController.navigate("auth") { popUpTo(0) }
-                    }
+                    viewModel.sessionManager.clearSession(coroutineScope)
+                    navController.navigate("auth") { popUpTo(0) }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
             ) {
